@@ -1,21 +1,17 @@
 use anyhow::bail;
 use anyhow::Result;
-use libbpf_cargo::SkeletonBuilder;
 use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::Skel;
-use libbpf_rs::PerfBufferBuilder;
-use libbpf_rs::Program;
+use libbpf_rs::skel::SkelBuilder;
 use libbpf_rs::RingBufferBuilder;
-use libbpf_rs::{skel::SkelBuilder, ObjectBuilder};
 use plain::Plain;
 use simple::simple_types;
 use simple::SimpleSkelBuilder;
-use std::path::PathBuf;
 use std::str;
 use std::time::Duration;
 use time::macros::format_description;
 use time::OffsetDateTime;
-#[path = "../simple"]
+#[path = "../simple.skel.rs"]
 mod simple;
 
 // Need to implement this because we are saying that it is safe to perform Plain operations
