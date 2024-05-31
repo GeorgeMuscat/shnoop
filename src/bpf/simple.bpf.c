@@ -1,6 +1,9 @@
+#include <linux/fs.h>
 #include <linux/bpf.h>
+#include <linux/ptrace.h> // For struct pt_regs
+#include <linux/uio.h>
+#include <bpf/bpf_tracing.h>
 #include <bpf/bpf_helpers.h>
-
 #define TASK_COMM_LEN 16
 #define MAX_FILENAME_LEN 512
 
@@ -29,6 +32,10 @@ struct event {
 
 /* Dummy instance to get skeleton to generate definition for `struct event` */
 struct event _event = {0};
+
+
+// This will be in .RO
+const volatile unsigned int target_ino = 0;
 
 /* BPF ringbuf map */
 struct {
@@ -62,5 +69,24 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
 	return 0;
 }
 
+// SEC("kprobe/tty_write")
+int kprobe__tty_write(struct pt_regs *ctx, struct kiocb *iocb,
+    struct iov_iter *from)
+	{
+		bpf_trace_printk("tty_write\n", 11);
+
+	/*
+		tty_write is used to write to any tty device (including pts).
+	 	To snoop on a specific tty efficiently, we should return if the inode
+		doesn't match the inode that corresponds with the desired device
+	*/
+
+	// Not sure if this is actually the fp we want
+	if (iocb->ki_filp)
+
+
+
+	return 0;
+}
 // Must have this license or the program will be rejected
 char LICENSE[] SEC("license") = "GPL";
