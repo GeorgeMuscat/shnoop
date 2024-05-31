@@ -9,6 +9,6 @@ fn main() {
 fn hello() {
     SkeletonBuilder::new()
         .source(PathBuf::new().join("src").join("bpf").join("simple.bpf.c"))
-        .build_and_generate("simple")
+        .build_and_generate("simple.skel.rs")
         .unwrap();
 }

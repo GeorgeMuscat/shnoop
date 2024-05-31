@@ -15,7 +15,7 @@ use std::str;
 use std::time::Duration;
 use time::macros::format_description;
 use time::OffsetDateTime;
-#[path = "../simple"]
+#[path = "../simple.skel.rs"]
 mod simple;
 
 // Need to implement this because we are saying that it is safe to perform Plain operations
@@ -82,10 +82,12 @@ fn main() -> Result<()> {
     // TODO: Pass the args here
     // TODO: Explain what the args are and what theyre used for
 
+    open_skel.rodata_mut().target_ino = 0;
+    // Loads the program in to the kernel
     let mut simple = open_skel.load()?;
 
     simple.attach()?;
-    println!("ATTACHING");
+    println!("ATTACHED");
     let mut rb_builder = RingBufferBuilder::new();
     let mut binding = simple.maps_mut();
     rb_builder.add(binding.rb(), handle_event)?;
