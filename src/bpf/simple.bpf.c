@@ -1,33 +1,23 @@
-#include <linux/fs.h>
-#include <linux/bpf.h>
-#include <linux/ptrace.h> // For struct pt_regs
-#include <linux/uio.h>
+#include "vmlinux.h"
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
+
 #define TASK_COMM_LEN 16
 #define MAX_FILENAME_LEN 512
 
-struct trace_entry {
-	short unsigned int type;
-	unsigned char flags;
-	unsigned char preempt_count;
-	int pid;
-};
 
-/* sched_process_exec tracepoint context */
-struct trace_event_raw_sched_process_exec {
-	struct trace_entry ent;
-	unsigned int __data_loc_filename;
-	int pid;
-	int old_pid;
-	char __data[0];
-};
+// From: https://github.com/torvalds/linux/blob/master/include/linux/uio.h
+#define ITER_SOURCE	1	// == WRITE
+#define ITER_DEST	0	// == READ
 
+#define WRITE ITER_SOURCE
+#define READ ITER_DEST
+#define BUFSIZE 256
 /* definition of a sample sent to user-space from BPF program */
 struct event {
-	int pid;
-	char comm[TASK_COMM_LEN];
-	char filename[MAX_FILENAME_LEN];
+    int count;
+    char buf[BUFSIZE];
 };
 
 /* Dummy instance to get skeleton to generate definition for `struct event` */
@@ -50,30 +40,42 @@ struct {
 	__type(value, struct event);
 } heap SEC(".maps");
 
-SEC("ksyscall/execve")
-int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
-{
-	unsigned fname_off = ctx->__data_loc_filename & 0xFFFF;
-	struct event *e;
-	int zero = 0;
 
-	e = bpf_map_lookup_elem(&heap, &zero);
-	if (!e) /* can't happen */
-		return 0;
+// static int do_tty_write(void *ctx, const char __user *buf, size_t count)
+// {
+//     int zero = 0, i;
+//     struct data_t *data;
 
-	e->pid = bpf_get_current_pid_tgid() >> 32; // Bottom half is the tgid
-	bpf_get_current_comm(&e->comm, sizeof(e->comm)); // Get the command
-	bpf_probe_read_str(&e->filename, sizeof(e->filename), (void *)ctx + fname_off);
 
-	bpf_ringbuf_output(&rb, e, sizeof(*e), 0);
-	return 0;
-}
+//     data = data_map.lookup(&zero);
+//     if (!data)
+//         return 0;
 
-// SEC("kprobe/tty_write")
-int kprobe__tty_write(struct pt_regs *ctx, struct kiocb *iocb,
-    struct iov_iter *from)
-	{
-		bpf_trace_printk("tty_write\n", 11);
+//     #pragma unroll
+//     for (i = 0; i < USER_DATACOUNT; i++) {
+//         // bpf_probe_read_user() can only use a fixed size, so truncate to count
+//         // in user space:
+//         if (bpf_probe_read_user(&data->buf, BUFSIZE, (void *)buf))
+//             return 0;
+//         if (count > BUFSIZE)
+//             data->count = BUFSIZE;
+//         else
+//             data->count = count;
+//         PERF_OUTPUT_CTX
+//         if (count < BUFSIZE)
+//             return 0;
+//         count -= BUFSIZE;
+//         buf += BUFSIZE;
+//     }
+
+//     return 0;
+// };
+
+SEC("kprobe/tty_write")
+int do_tty_write(struct pt_regs *ctx) {
+	/**
+     * kernel_ver <  5.14.0: This will break because from->iter_type is not defined
+     */
 
 	/*
 		tty_write is used to write to any tty device (including pts).
@@ -81,10 +83,36 @@ int kprobe__tty_write(struct pt_regs *ctx, struct kiocb *iocb,
 		doesn't match the inode that corresponds with the desired device
 	*/
 
-	// Not sure if this is actually the fp we want
-	if (iocb->ki_filp)
+	struct kiocb *iocb = PT_REGS_PARM1(ctx);
+	struct iov_iter *from = PT_REGS_PARM2(ctx);
+    const struct kvec *kvec;
+
+	// // Same as: iocb->ki_filp->f_inode->i_ino != target_ino
+    if (BPF_CORE_READ(iocb, ki_filp, f_inode, i_ino)  != target_ino)
+        return 0;
 
 
+	// // TODO: Explain this
+	if (BPF_CORE_READ(from, iter_type) != ITER_IOVEC)
+        return 0;
+
+    if (BPF_CORE_READ(from, data_source) != WRITE)
+        return 0;
+
+	struct event *e;
+	int zero = 0;
+
+	e = bpf_map_lookup_elem(&heap, &zero);
+	if (!e) /* can't happen */
+		return 0;
+	kvec = BPF_CORE_READ(from, kvec);
+
+	bpf_probe_read_kernel(&e->buf, sizeof(e->buf), &kvec->iov_base);
+	bpf_probe_read_kernel(&e->count, sizeof(e->count), &kvec->iov_len);
+
+
+	// May need to be smart about how this is done, (rb space issues)
+	bpf_ringbuf_output(&rb, e, sizeof(*e), 0);
 
 	return 0;
 }
